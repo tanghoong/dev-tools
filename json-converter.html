@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Parser & Converter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/material-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/matchbrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/fold/foldcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/fold/foldgutter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/fold/brace-fold.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/fold/foldgutter.min.css">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; margin: 0; overflow: hidden; display: flex; height: 100vh; flex-direction: column; }
+        .header { flex-shrink: 0; background-color: #e5e7eb; padding: 0.5rem 1rem; border-bottom: 1px solid #d1d5db; display: flex; align-items: center; gap: 1rem; }
+        .main-container { display: flex; flex-grow: 1; width: 100%; overflow: hidden; }
+        .column { height: 100%; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+        .column-half { width: 50%; }
+        .resizer { 
+            background-color: #d1d5db; width: 6px; height: 100%; cursor: col-resize; flex-shrink: 0; z-index: 10; 
+            transition: width 0.3s ease, opacity 0.3s ease, background-color 0.2s; 
+            position: relative;
+        }
+        .resizer:hover, .resizer.active { background-color: #9ca3af; width: 8px; }
+        .editor-area { flex-grow: 1; position: relative; overflow: hidden; }
+        .cm-editor { height: 100%; font-size: 14px; border: 1px solid #e5e7eb; }
+        .action-button { padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 600; transition: background-color 0.2s ease, color 0.2s ease; cursor: pointer; text-align: center; border: 1px solid transparent; }
+        .primary-button { background-color: #3b82f6; color: white; }
+        .primary-button:hover { background-color: #2563eb; }
+        .secondary-button { background-color: #6b7280; color: white; }
+        .secondary-button:hover { background-color: #4b5563; }
+        .controls { padding: 0.5rem; background-color: #f3f4f6; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+        .control-label { font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
+        .error-message {
+            color: #b91c1c;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+            background-color: #fee2e2;
+            border-radius: 0.25rem;
+            display: none;
+        }
+        .success-message {
+            color: #15803d;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+            background-color: #dcfce7;
+            border-radius: 0.25rem;
+            display: none;
+        }
+        .CodeMirror { height: 100%; }
+        .format-options { display: flex; gap: 0.5rem; }
+        .format-indicator { padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+        .format-json { background-color: #dbeafe; color: #1e40af; }
+        .format-string { background-color: #e0e7ff; color: #3730a3; }
+        .format-table { background-color: #f0fdf4; color: #166534; }
+        
+        /* Toggle JSON fold buttons */
+        .toggle-button {
+            cursor: pointer;
+            user-select: none;
+            color: #4b5563;
+            padding: 0 3px;
+            margin-right: 3px;
+            display: inline-block;
+            font-size: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 3px;
+            vertical-align: middle;
+        }
+        .toggle-button:hover {
+            background-color: #f3f4f6;
+        }
+        
+        /* JSON Table View Styles */
+        .table-view-container {
+            overflow: auto;
+            height: 100%;
+            display: none;
+            padding: 1rem;
+            background-color: white;
+        }
+        .json-table {
+            border-collapse: collapse;
+            width: 100%;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .json-table th {
+            background-color: #f3f4f6;
+            font-weight: 600;
+            text-align: left;
+            padding: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .json-table td {
+            padding: 8px;
+            border: 1px solid #e5e7eb;
+            vertical-align: top;
+        }
+        .json-table tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+        .json-table tr:hover {
+            background-color: #f0f9ff;
+        }
+        .key-column {
+            font-weight: 600;
+            width: 20%;
+            color: #1f2937;
+        }
+        .value-column {
+            width: 50%;
+        }
+        .type-column {
+            width: 15%;
+            color: #6b7280;
+            font-style: italic;
+        }
+        .path-column {
+            width: 15%;
+            color: #4b5563;
+            font-size: 12px;
+        }
+        .nested-table {
+            margin-left: 20px;
+            width: calc(100% - 20px);
+        }
+        .array-value {
+            padding: 2px 5px;
+            background-color: #e0e7ff;
+            border-radius: 3px;
+            margin: 2px;
+            display: inline-block;
+        }
+        .object-value {
+            padding: 2px 5px;
+            background-color: #dbeafe;
+            border-radius: 3px;
+            margin: 2px;
+            display: inline-block;
+        }
+        
+        /* Collapsible table sections */
+        .collapsible-row {
+            cursor: pointer;
+        }
+        .collapsible-row td {
+            position: relative;
+        }
+        .collapsible-row td:first-child::before {
+            content: "►";
+            display: inline-block;
+            margin-right: 5px;
+            transition: transform 0.2s;
+            font-size: 10px;
+        }
+        .collapsible-row.expanded td:first-child::before {
+            transform: rotate(90deg);
+        }
+        .collapsible-content {
+            display: none;
+        }
+        .collapsible-content.expanded {
+            display: table-row;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 class="text-xl font-semibold text-gray-800">JSON Parser & Converter</h1>
+        <a href="index.html" class="text-blue-600 hover:text-blue-800">Back to Tools</a>
+    </div>
+    <div class="main-container">
+        <!-- Left Column (Input) -->
+        <div class="column column-half">
+            <div class="controls">
+                <div>
+                    <div class="control-label">Input</div>
+                    <div class="format-indicator format-auto" id="inputFormat">Auto-detect</div>
+                </div>
+                <div class="format-options">
+                    <button id="formatInput" class="action-button secondary-button">Format</button>
+                    <button id="toggleFold" class="action-button secondary-button">Toggle Fold</button>
+                    <button id="clearInput" class="action-button secondary-button">Clear</button>
+                </div>
+            </div>
+            <div class="editor-area" id="input-editor"></div>
+            <div id="inputError" class="error-message"></div>
+        </div>
+        
+        <!-- Resizer -->
+        <div class="resizer" id="resizer"></div>
+        
+        <!-- Right Column (Output) -->
+        <div class="column column-half">
+            <div class="controls">
+                <div>
+                    <div class="control-label">Output</div>
+                    <div class="flex gap-2">
+                        <div class="format-indicator format-json" id="outputJsonFormat">JSON</div>
+                        <div class="format-indicator format-string" id="outputStringFormat">String</div>
+                        <div class="format-indicator format-table" id="outputTableFormat">Table</div>
+                    </div>
+                </div>
+                <div>
+                    <button id="convertBtn" class="action-button primary-button">Convert</button>
+                    <button id="copyOutput" class="action-button secondary-button">Copy</button>
+                </div>
+            </div>
+            <div class="editor-area" id="output-editor"></div>
+            <div class="table-view-container" id="table-view"></div>
+            <div id="outputSuccess" class="success-message"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize CodeMirror editors
+        const inputEditor = CodeMirror(document.getElementById('input-editor'), {
+            mode: 'javascript',
+            theme: 'default',
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            foldGutter: true,
+            gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+            tabSize: 2,
+            indentWithTabs: false
+        });
+        
+        const outputEditor = CodeMirror(document.getElementById('output-editor'), {
+            mode: 'javascript',
+            theme: 'default',
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            foldGutter: true,
+            gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+            tabSize: 2,
+            indentWithTabs: false,
+            readOnly: true
+        });
+        
+        // Output format elements
+        const outputEditorElement = document.getElementById('output-editor');
+        const tableViewElement = document.getElementById('table-view');
+        
+        // Format indicators
+        const inputFormat = document.getElementById('inputFormat');
+        const outputJsonFormat = document.getElementById('outputJsonFormat');
+        const outputStringFormat = document.getElementById('outputStringFormat');
+        const outputTableFormat = document.getElementById('outputTableFormat');
+        
+        // Error/Success elements
+        const inputError = document.getElementById('inputError');
+        const outputSuccess = document.getElementById('outputSuccess');
+        
+        // Set active output format
+        let outputFormat = 'json'; // 'json', 'string', or 'table'
+        
+        function updateOutputFormatDisplay() {
+            outputJsonFormat.style.opacity = (outputFormat === 'json') ? '1' : '0.5';
+            outputStringFormat.style.opacity = (outputFormat === 'string') ? '1' : '0.5';
+            outputTableFormat.style.opacity = (outputFormat === 'table') ? '1' : '0.5';
+            
+            // Show/hide appropriate output view
+            outputEditorElement.style.display = (outputFormat === 'table') ? 'none' : 'block';
+            tableViewElement.style.display = (outputFormat === 'table') ? 'block' : 'none';
+        }
+        
+        outputJsonFormat.addEventListener('click', () => {
+            outputFormat = 'json';
+            updateOutputFormatDisplay();
+            // Re-convert if we have content
+            if (outputEditor.getValue().trim()) {
+                convertInput();
+            }
+        });
+        
+        outputStringFormat.addEventListener('click', () => {
+            outputFormat = 'string';
+            updateOutputFormatDisplay();
+            // Re-convert if we have content
+            if (outputEditor.getValue().trim()) {
+                convertInput();
+            }
+        });
+        
+        outputTableFormat.addEventListener('click', () => {
+            outputFormat = 'table';
+            updateOutputFormatDisplay();
+            // Re-convert if we have content
+            if (outputEditor.getValue().trim()) {
+                convertInput();
+            }
+        });
+        
+        updateOutputFormatDisplay();
+        
+        // Auto-detect input format
+        function detectInputFormat() {
+            const input = inputEditor.getValue().trim();
+            
+            if (!input) {
+                inputFormat.textContent = 'Auto-detect';
+                inputFormat.className = 'format-indicator format-auto';
+                return null;
+            }
+            
+            try {
+                // Check if it's valid JSON
+                JSON.parse(input);
+                inputFormat.textContent = 'JSON';
+                inputFormat.className = 'format-indicator format-json';
+                return 'json';
+            } catch (e) {
+                // If not JSON, assume it's a string
+                inputFormat.textContent = 'String';
+                inputFormat.className = 'format-indicator format-string';
+                return 'string';
+            }
+        }
+        
+        // Convert JSON to HTML table
+        function jsonToTable(json, parentPath = '') {
+            if (typeof json !== 'object' || json === null) {
+                return `<span>${JSON.stringify(json)}</span>`;
+            }
+            
+            const isArray = Array.isArray(json);
+            let tableHtml = '<table class="json-table">';
+            
+            // Table headers
+            tableHtml += `
+                <thead>
+                    <tr>
+                        <th class="key-column">${isArray ? 'Index' : 'Key'}</th>
+                        <th class="value-column">Value</th>
+                        <th class="type-column">Type</th>
+                        <th class="path-column">Path</th>
+                    </tr>
+                </thead>
+                <tbody>
+            `;
+            
+            // Table rows
+            if (isArray) {
+                json.forEach((item, index) => {
+                    const currentPath = parentPath ? `${parentPath}[${index}]` : `[${index}]`;
+                    const valueType = typeof item;
+                    
+                    if (valueType === 'object' && item !== null) {
+                        // Nested object or array
+                        tableHtml += `
+                            <tr class="collapsible-row">
+                                <td class="key-column">${index}</td>
+                                <td class="value-column">${Array.isArray(item) ? 'Array' : 'Object'} (${Array.isArray(item) ? item.length : Object.keys(item).length} items)</td>
+                                <td class="type-column">${Array.isArray(item) ? 'array' : 'object'}</td>
+                                <td class="path-column">${currentPath}</td>
+                            </tr>
+                            <tr class="collapsible-content">
+                                <td colspan="4">
+                                    ${jsonToTable(item, currentPath)}
+                                </td>
+                            </tr>
+                        `;
+                    } else {
+                        // Simple value
+                        tableHtml += `
+                            <tr>
+                                <td class="key-column">${index}</td>
+                                <td class="value-column">${formatValue(item)}</td>
+                                <td class="type-column">${valueType}</td>
+                                <td class="path-column">${currentPath}</td>
+                            </tr>
+                        `;
+                    }
+                });
+            } else {
+                // Object
+                Object.entries(json).forEach(([key, value]) => {
+                    const currentPath = parentPath ? `${parentPath}.${key}` : key;
+                    const valueType = typeof value;
+                    
+                    if (valueType === 'object' && value !== null) {
+                        // Nested object or array
+                        tableHtml += `
+                            <tr class="collapsible-row">
+                                <td class="key-column">${key}</td>
+                                <td class="value-column">${Array.isArray(value) ? 'Array' : 'Object'} (${Array.isArray(value) ? value.length : Object.keys(value).length} items)</td>
+                                <td class="type-column">${Array.isArray(value) ? 'array' : 'object'}</td>
+                                <td class="path-column">${currentPath}</td>
+                            </tr>
+                            <tr class="collapsible-content">
+                                <td colspan="4">
+                                    ${jsonToTable(value, currentPath)}
+                                </td>
+                            </tr>
+                        `;
+                    } else {
+                        // Simple value
+                        tableHtml += `
+                            <tr>
+                                <td class="key-column">${key}</td>
+                                <td class="value-column">${formatValue(value)}</td>
+                                <td class="type-column">${valueType}</td>
+                                <td class="path-column">${currentPath}</td>
+                            </tr>
+                        `;
+                    }
+                });
+            }
+            
+            tableHtml += '</tbody></table>';
+            return tableHtml;
+        }
+        
+        // Format value for table display
+        function formatValue(value) {
+            if (value === null) return '<span class="text-gray-500">null</span>';
+            if (value === undefined) return '<span class="text-gray-500">undefined</span>';
+            
+            switch (typeof value) {
+                case 'string':
+                    return `<span class="text-green-700">"${value}"</span>`;
+                case 'number':
+                    return `<span class="text-blue-700">${value}</span>`;
+                case 'boolean':
+                    return `<span class="text-purple-700">${value}</span>`;
+                case 'object':
+                    if (Array.isArray(value)) {
+                        return `<span class="array-value">Array(${value.length})</span>`;
+                    } else {
+                        return `<span class="object-value">Object(${Object.keys(value).length})</span>`;
+                    }
+                default:
+                    return String(value);
+            }
+        }
+        
+        // Setup collapsible table rows
+        function setupTableCollapsible() {
+            const collapsibleRows = document.querySelectorAll('.collapsible-row');
+            
+            collapsibleRows.forEach(row => {
+                row.addEventListener('click', () => {
+                    row.classList.toggle('expanded');
+                    const content = row.nextElementSibling;
+                    content.classList.toggle('expanded');
+                });
+            });
+        }
+        
+        // Convert function
+        function convertInput() {
+            const input = inputEditor.getValue().trim();
+            
+            if (!input) {
+                showInputError('Please enter some content to convert');
+                return;
+            }
+            
+            hideInputError();
+            hideOutputSuccess();
+            
+            const inputType = detectInputFormat();
+            
+            try {
+                let parsedJson;
+                
+                if (inputType === 'json') {
+                    // Input is JSON
+                    parsedJson = JSON.parse(input);
+                    
+                    if (outputFormat === 'json') {
+                        // JSON to JSON (just format)
+                        outputEditor.setValue(JSON.stringify(parsedJson, null, 2));
+                    } else if (outputFormat === 'string') {
+                        // JSON to String
+                        outputEditor.setValue(JSON.stringify(parsedJson));
+                    } else if (outputFormat === 'table') {
+                        // JSON to Table
+                        tableViewElement.innerHTML = jsonToTable(parsedJson);
+                        setupTableCollapsible();
+                    }
+                } else {
+                    // Input is String, try to parse as JSON
+                    try {
+                        parsedJson = JSON.parse(input);
+                        
+                        if (outputFormat === 'json') {
+                            // String to JSON
+                            outputEditor.setValue(JSON.stringify(parsedJson, null, 2));
+                        } else if (outputFormat === 'string') {
+                            // String to String (no change)
+                            outputEditor.setValue(input);
+                        } else if (outputFormat === 'table') {
+                            // String to Table (if it's valid JSON)
+                            tableViewElement.innerHTML = jsonToTable(parsedJson);
+                            setupTableCollapsible();
+                        }
+                    } catch (e) {
+                        // Input is a regular string, not JSON
+                        if (outputFormat === 'json') {
+                            // String to JSON - create a JSON with the string as value
+                            outputEditor.setValue(JSON.stringify({ value: input }, null, 2));
+                        } else if (outputFormat === 'string') {
+                            // String to String (no change)
+                            outputEditor.setValue(input);
+                        } else if (outputFormat === 'table') {
+                            // String to Table - create a simple table with the string value
+                            const simpleJson = { value: input };
+                            tableViewElement.innerHTML = jsonToTable(simpleJson);
+                            setupTableCollapsible();
+                        }
+                    }
+                }
+                
+                showOutputSuccess('Conversion successful!');
+            } catch (e) {
+                showInputError('Invalid input: ' + e.message);
+            }
+        }
+        
+        document.getElementById('convertBtn').addEventListener('click', convertInput);
+        
+        // Toggle Fold function for input editor
+        document.getElementById('toggleFold').addEventListener('click', () => {
+            const editor = inputEditor;
+            
+            // Find JSON object/array opening/closing positions
+            const content = editor.getValue();
+            const lines = content.split('\n');
+            
+            // Toggle all folds in document
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.includes('{') || line.includes('[')) {
+                    editor.foldCode(CodeMirror.Pos(i, 0));
+                }
+            }
+        });
+        
+        // Format input
+        document.getElementById('formatInput').addEventListener('click', () => {
+            const input = inputEditor.getValue().trim();
+            
+            if (!input) return;
+            
+            try {
+                // Try to parse as JSON and format
+                const parsedJson = JSON.parse(input);
+                inputEditor.setValue(JSON.stringify(parsedJson, null, 2));
+                hideInputError();
+            } catch (e) {
+                showInputError('Cannot format: Input is not valid JSON');
+            }
+        });
+        
+        // Clear input
+        document.getElementById('clearInput').addEventListener('click', () => {
+            inputEditor.setValue('');
+            hideInputError();
+        });
+        
+        // Copy output to clipboard
+        document.getElementById('copyOutput').addEventListener('click', () => {
+            let outputText;
+            
+            if (outputFormat === 'table') {
+                // For table view, get the JSON and copy it
+                try {
+                    const currentOutput = JSON.parse(outputEditor.getValue());
+                    outputText = JSON.stringify(currentOutput, null, 2);
+                } catch (e) {
+                    outputText = outputEditor.getValue();
+                }
+            } else {
+                outputText = outputEditor.getValue();
+            }
+            
+            if (!outputText) return;
+            
+            navigator.clipboard.writeText(outputText)
+                .then(() => {
+                    showOutputSuccess('Copied to clipboard!');
+                })
+                .catch(err => {
+                    console.error('Failed to copy: ', err);
+                });
+        });
+        
+        // Error/Success message functions
+        function showInputError(message) {
+            inputError.textContent = message;
+            inputError.style.display = 'block';
+        }
+        
+        function hideInputError() {
+            inputError.style.display = 'none';
+        }
+        
+        function showOutputSuccess(message) {
+            outputSuccess.textContent = message;
+            outputSuccess.style.display = 'block';
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                outputSuccess.style.display = 'none';
+            }, 3000);
+        }
+        
+        function hideOutputSuccess() {
+            outputSuccess.style.display = 'none';
+        }
+        
+        // Resizer functionality
+        const resizer = document.getElementById('resizer');
+        const leftColumn = document.querySelector('.column:first-child');
+        const rightColumn = document.querySelector('.column:last-child');
+        
+        let isResizing = false;
+        
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizer.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', stopResize);
+            e.preventDefault();
+        });
+        
+        function handleMouseMove(e) {
+            if (!isResizing) return;
+            
+            const containerWidth = document.querySelector('.main-container').clientWidth;
+            const leftWidth = e.clientX;
+            const rightWidth = containerWidth - e.clientX - resizer.clientWidth;
+            
+            leftColumn.style.width = `${leftWidth}px`;
+            rightColumn.style.width = `${rightWidth}px`;
+            
+            // Refresh CodeMirror
+            inputEditor.refresh();
+            outputEditor.refresh();
+        }
+        
+        function stopResize() {
+            isResizing = false;
+            resizer.classList.remove('active');
+            document.body.style.cursor = '';
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', stopResize);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            inputEditor.refresh();
+            outputEditor.refresh();
+        });
+        
+        // Insert sample JSON on load
+        const sampleJson = {
+            name: "JSON Converter",
+            features: ["String to JSON", "JSON to String", "Formatting", "Table View", "Toggle Fields"],
+            version: "1.1",
+            isAwesome: true,
+            stats: {
+                ease: 10,
+                speed: 9.5
+            },
+            examples: [
+                {
+                    type: "simple",
+                    data: {
+                        id: 1,
+                        value: "test"
+                    }
+                },
+                {
+                    type: "complex",
+                    data: {
+                        nested: {
+                            objects: ["are", "supported"]
+                        }
+                    }
+                }
+            ]
+        };
+        
+        inputEditor.setValue(JSON.stringify(sampleJson, null, 2));
+        detectInputFormat();
+    </script>
+</body>
+</html> 
