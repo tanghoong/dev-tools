@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mermaid 编辑器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+        window.mermaid = mermaid;
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/material-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/closebrackets.min.js"></script>
+
+    <style>
+        /* Basic styling */
+        body { font-family: 'Inter', sans-serif; margin: 0; overflow: hidden; display: flex; height: 100vh; flex-direction: column; }
+        .header { flex-shrink: 0; background-color: #e5e7eb; padding: 0.5rem 1rem; border-bottom: 1px solid #d1d5db; display: flex; align-items: center; gap: 1rem; }
+        .main-container { display: flex; flex-grow: 1; width: 100%; overflow: hidden; }
+        .column { height: 100%; overflow: hidden; display: flex; flex-direction: column; position: relative; transition: flex-basis 0.3s ease, width 0.3s ease, padding 0.3s ease, opacity 0.3s ease; }
+        .list-column { background-color: #f3f4f6; }
+        .preview-column { background-color: #ffffff; display: flex; flex-direction: column; overflow: hidden; }
+        .preview-content-area { flex-grow: 1; overflow: hidden; padding: 0; position: relative; display: flex; flex-direction: column; }
+        #mermaid-preview {
+            flex-grow: 1; width: 100%; height: 100%;
+            cursor: grab; overflow: hidden; position: relative; background-color: #f9fafb;
+            /* Prevent text selection in the preview area */
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        #mermaid-preview svg {
+            transition: transform 0.1s ease-out; display: block; max-width: none; max-height: none;
+            position: absolute;
+            pointer-events: none; /* Prevent mouse events on SVG elements to avoid selection */
+        }
+        #mermaid-preview.grabbing { cursor: grabbing; }
+        .editor-column { background-color: #f9fafb; }
+        .resizer { 
+            background-color: #d1d5db; width: 6px; height: 100%; cursor: col-resize; flex-shrink: 0; z-index: 10; 
+            transition: width 0.3s ease, opacity 0.3s ease, background-color 0.2s; 
+            position: relative;
+        }
+        .resizer:hover, .resizer.active { background-color: #9ca3af; width: 8px; }
+        .resizer::after {
+            content: ""; 
+            position: absolute; 
+            top: calc(50% - 25px); 
+            left: -4px; 
+            width: 12px; 
+            height: 50px; 
+            background-color: rgba(156, 163, 175, 0.3); 
+            border-radius: 3px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .resizer:hover::after { opacity: 1; }
+        .column.hidden, .resizer.hidden {
+             flex-basis: 0 !important; width: 0 !important; padding: 0 !important;
+             overflow: hidden; opacity: 0; border: none;
+             margin: 0 !important; border-width: 0 !important;
+        }
+        #codemirror-editor { flex-grow: 1; position: relative; overflow: hidden; }
+        .cm-editor { height: 100%; font-size: 14px; border: 1px solid #e5e7eb; }
+        .diagram-list-item { 
+            cursor: pointer; padding: 0.5rem 1rem; border-bottom: 1px solid #e5e7eb; 
+            transition: background-color 0.2s ease; display: flex; justify-content: space-between; align-items: center; 
+        }
+        .diagram-list-item:hover { background-color: #e5e7eb; }
+        .diagram-list-item.selected { background-color: #dbeafe; font-weight: 600; }
+        .diagram-name { flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .diagram-actions { display: flex; gap: 0.5rem; opacity: 0; transition: opacity 0.2s ease; }
+        .diagram-list-item:hover .diagram-actions { opacity: 1; }
+        .action-icon { 
+            background: none; border: none; padding: 0.2rem; cursor: pointer; 
+            color: #6b7280; border-radius: 0.25rem; display: flex; align-items: center; justify-content: center;
+        }
+        .action-icon:hover { background-color: rgba(107, 114, 128, 0.1); color: #374151; }
+        .action-icon.delete-btn:hover { color: #dc2626; }
+        .action-icon.rename-btn:hover { color: #2563eb; }
+        .action-button, .toggle-button, .control-button { padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 600; transition: background-color 0.2s ease, color 0.2s ease; cursor: pointer; text-align: center; border: 1px solid transparent; }
+        .primary-button { background-color: #3b82f6; color: white; }
+        .primary-button:hover { background-color: #2563eb; }
+        .secondary-button { background-color: #6b7280; color: white; }
+        .secondary-button:hover { background-color: #4b5563; }
+        .toggle-button { background-color: #ffffff; border-color: #d1d5db; color: #374151; }
+        .toggle-button:hover { background-color: #f9fafb; }
+        .toggle-button.active { background-color: #dbeafe; border-color: #93c5fd; color: #1e40af; }
+        .preview-controls { flex-shrink: 0; padding: 0.5rem; background-color: #e5e7eb; border-top: 1px solid #d1d5db; display: flex; justify-content: center; gap: 0.5rem; }
+        .control-button { background-color: #ffffff; border: 1px solid #d1d5db; color: #374151; padding: 0.3rem 0.6rem; font-size: 0.875rem; line-height: 1; }
+        .control-button:hover { background-color: #f3f4f6; }
+        .control-button svg { display: inline-block; width: 1.1rem; height: 1.1rem; margin-right: 0.25rem; vertical-align: middle; }
+        .control-button span { vertical-align: middle; }
+        .save-indicator {
+            position: absolute;
+            bottom: 1rem;
+            right: 1rem;
+            background-color: rgba(16, 185, 129, 0.9);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-weight: 600;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s, transform 0.3s;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            z-index: 100;
+        }
+        .save-indicator.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .rename-form {
+            display: flex;
+            width: 100%;
+            align-items: center;
+        }
+        .rename-input {
+            flex-grow: 1;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid #93c5fd;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            outline: none;
+            background-color: white;
+        }
+        .rename-input:focus {
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+        /* Modal styles for export options */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        .modal-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-content {
+            background-color: white;
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            transform: translateY(-20px);
+            transition: transform 0.3s ease;
+        }
+        .modal-overlay.visible .modal-content {
+            transform: translateY(0);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.25rem;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6b7280;
+        }
+        .modal-close:hover {
+            color: #111827;
+        }
+        .export-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .export-option {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+            padding: 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .export-option:hover {
+            background-color: #f3f4f6;
+            border-color: #d1d5db;
+            transform: translateY(-2px);
+        }
+        .export-option.selected {
+            background-color: #dbeafe;
+            border-color: #93c5fd;
+        }
+        .export-option img {
+            width: 32px;
+            height: 32px;
+            margin-bottom: 0.5rem;
+        }
+        .export-option-title {
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        .export-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+        }
+        .modal-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .modal-btn-cancel {
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+            color: #374151;
+        }
+        .modal-btn-cancel:hover {
+            background-color: #e5e7eb;
+        }
+        .modal-btn-primary {
+            background-color: #3b82f6;
+            border: 1px solid #2563eb;
+            color: white;
+        }
+        .modal-btn-primary:hover {
+            background-color: #2563eb;
+        }
+        .modal-btn-primary:disabled {
+            background-color: #93c5fd;
+            border-color: #60a5fa;
+            cursor: not-allowed;
+        }
+        .export-options-container {
+            margin-bottom: 1rem;
+        }
+        .export-option-label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        .export-option-select {
+            width: 100%;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            border: 1px solid #d1d5db;
+            background-color: white;
+            font-size: 0.875rem;
+        }
+        .export-option-select:focus {
+            outline: none;
+            border-color: #93c5fd;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+        .export-scale-options {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+        .export-scale-option {
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .export-scale-option:hover {
+            background-color: #e5e7eb;
+        }
+        .export-scale-option.selected {
+            background-color: #dbeafe;
+            border-color: #93c5fd;
+            color: #1e40af;
+        }
+        .export-option-desc {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.25rem;
+        }
+        .export-option-hint {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.5rem;
+            margin-bottom: 0;
+        }
+        .export-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            margin: 1rem 0;
+            background-color: #f3f4f6;
+            border-radius: 0.375rem;
+            transition: all 0.3s ease;
+        }
+        .export-status.hidden {
+            display: none;
+        }
+        .spinner {
+            border: 3px solid rgba(156, 163, 175, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin-right: 0.75rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-text {
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <span class="font-semibold text-gray-700">视图切换:</span>
+    <button id="toggle-left" class="toggle-button active" title="切换左侧列表栏">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V3zm2 1v12h10V4H5z" clip-rule="evenodd" /><path d="M7 6h2v8H7V6z" /></svg>
+        <span>列表</span>
+    </button>
+    <button id="toggle-right" class="toggle-button active" title="切换右侧编辑栏">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V3zm12 1H5v12h10V4z" clip-rule="evenodd" /><path d="M11 6h2v8h-2V6z" /></svg>
+        <span>编辑</span>
+    </button>
+    <div class="flex-grow"></div>
+    <button id="export-button" class="action-button primary-button" title="导出图片">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+        </svg>
+        <span>导出</span>
+    </button>
+</div>
+
+<div class="main-container">
+    <div id="list-column" class="column list-column" style="flex-basis: 20%;">
+        <div class="p-4 border-b border-gray-300 flex-shrink-0">
+            <h2 class="text-lg font-semibold mb-3">我的图表</h2>
+            <input type="text" id="search-input" placeholder="搜索图表..." class="w-full p-2 border border-gray-300 rounded-md mb-3 text-sm">
+            <button id="new-button" class="action-button primary-button w-full">+ 新建图表</button>
+        </div>
+        <div id="diagram-list" class="overflow-y-auto flex-grow"></div>
+    </div>
+    <div id="resizer-1" class="resizer" data-resizer-for="list-column"></div>
+    <div id="preview-column" class="column preview-column" style="flex-basis: 40%;">
+        <div class="preview-content-area">
+             <div id="mermaid-preview">
+                 <span class="text-gray-500 default-preview-text">选择一个图表或创建一个新图表进行预览</span>
+             </div>
+        </div>
+        <div class="preview-controls">
+             <button id="zoom-out-button" class="control-button" title="缩小">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>
+                 <span>缩小</span>
+             </button>
+             <button id="zoom-in-button" class="control-button" title="放大">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd" /></svg>
+                 <span>放大</span>
+             </button>
+             <button id="reset-view-button" class="control-button" title="重置视图 (100%)">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 110 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.546A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.546-1.276z" clip-rule="evenodd" /></svg>
+                 <span>重置</span>
+             </button>
+              <button id="fit-view-button" class="control-button" title="适应屏幕">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2v8h10V6H5zm2 2h2v4H7V8zm4 0h2v4h-2V8z" clip-rule="evenodd" /></svg>
+                 <span>适应</span>
+             </button>
+        </div>
+        <div id="mermaid-error" class="hidden"></div>
+    </div>
+    <div id="resizer-2" class="resizer" data-resizer-for="preview-column"></div>
+    <div id="editor-column" class="column editor-column" style="flex-basis: 40%;">
+        <div id="codemirror-editor"></div>
+        <div class="p-2 border-t border-gray-200 flex-shrink-0">
+             <button id="save-button" class="action-button secondary-button w-full">保存图表</button>
+        </div>
+    </div>
+</div>
+
+<!-- Save indicator -->
+<div id="save-indicator" class="save-indicator">已保存 ✓</div>
+
+<!-- Export modal -->
+<div id="export-modal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>导出图表</h3>
+            <button class="modal-close" id="export-modal-close">&times;</button>
+        </div>
+        <div class="export-options">
+            <div class="export-option selected" data-format="png">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <div class="export-option-title">PNG</div>
+                <div class="export-option-desc">适合文档和分享</div>
+            </div>
+            <div class="export-option" data-format="svg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                <div class="export-option-title">SVG</div>
+                <div class="export-option-desc">矢量格式，可无损缩放</div>
+            </div>
+        </div>
+        <div class="export-options-container">
+            <label class="export-option-label">缩放比例</label>
+            <div class="export-scale-options">
+                <div class="export-scale-option" data-scale="1">1x</div>
+                <div class="export-scale-option selected" data-scale="2">2x</div>
+                <div class="export-scale-option" data-scale="3">3x</div>
+                <div class="export-scale-option" data-scale="4">4x</div>
+            </div>
+            <p class="export-option-hint">
+                提示: 选择更高的缩放比例可获得更清晰的图片，但文件会更大
+            </p>
+        </div>
+        <div id="export-status" class="export-status hidden">
+            <div class="spinner"></div>
+            <span class="status-text">正在生成图表...</span>
+        </div>
+        <div class="export-actions">
+            <button class="modal-btn modal-btn-cancel" id="export-cancel">取消</button>
+            <button class="modal-btn modal-btn-primary" id="export-confirm">下载</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // --- Configuration (保持不变) ---
+    const LOCAL_STORAGE_KEY = 'mermaid_diagrams_data_v6'; // Incremented key version
+    const DEFAULT_DIAGRAM_CONTENT = `graph TD\n    A[开始] --> B(处理);\n    B --> C{判断?};\n    C -- Yes --> D[结果1];\n    C -- No --> E[结果2];\n    D --> F[结束];\n    E --> F;`;
+    const MIN_COLUMN_WIDTH = 50;
+    const ZOOM_SENSITIVITY = 0.001;
+    const ZOOM_BUTTON_FACTOR = 1.2;
+    const MIN_ZOOM = 0.1;
+    const MAX_ZOOM = 5.0;
+    const FIT_PADDING = 40;
+
+    // --- DOM Elements (保持不变) ---
+    const header = document.querySelector('.header');
+    const listColumn = document.getElementById('list-column');
+    const previewColumn = document.getElementById('preview-column');
+    const editorColumn = document.getElementById('editor-column');
+    const diagramListContainer = document.getElementById('diagram-list');
+    const mermaidPreviewContainer = document.getElementById('mermaid-preview');
+    const mermaidErrorContainer = document.getElementById('mermaid-error');
+    const newButton = document.getElementById('new-button');
+    const saveButton = document.getElementById('save-button');
+    const searchInput = document.getElementById('search-input');
+    const codeMirrorEditorDiv = document.getElementById('codemirror-editor');
+    const resizer1 = document.getElementById('resizer-1');
+    const resizer2 = document.getElementById('resizer-2');
+    const resizers = document.querySelectorAll('.resizer');
+    const toggleLeftButton = document.getElementById('toggle-left');
+    const toggleRightButton = document.getElementById('toggle-right');
+    const zoomOutButton = document.getElementById('zoom-out-button');
+    const zoomInButton = document.getElementById('zoom-in-button');
+    const resetViewButton = document.getElementById('reset-view-button');
+    const fitViewButton = document.getElementById('fit-view-button');
+    const defaultPreviewText = mermaidPreviewContainer.querySelector('.default-preview-text'); // Get reference to default text
+
+
+    // --- State (保持不变) ---
+    let diagrams = [];
+    let currentDiagramId = null;
+    let codeMirrorInstance = null;
+    let isResizing = false;
+    let activeResizer = null;
+    let currentZoom = 1.0;
+    let isPanning = false;
+    let panStartX, panStartY;
+    let svgInitialX = 0, svgInitialY = 0;
+    let svgCurrentX = 0, svgCurrentY = 0;
+
+    // --- Initialization ---
+    function initCodeMirror() {
+        // Initialize CodeMirror editor with markdown mode and auto-closing brackets
+        codeMirrorInstance = CodeMirror(codeMirrorEditorDiv, {
+            mode: 'markdown',
+            theme: 'material-dark',
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            lineWrapping: true,
+            tabSize: 2,
+            indentWithTabs: true,
+            autofocus: false
+        });
+
+        // Set up change handler to update preview as user types
+        codeMirrorInstance.on('change', (cm) => {
+            const code = cm.getValue();
+            updatePreview(code);
+        });
+    }
+
+    function loadDiagrams() {
+        try {
+            const savedData = localStorage.getItem(LOCAL_STORAGE_KEY);
+            if (savedData) {
+                diagrams = JSON.parse(savedData);
+                renderList();
+            } else {
+                diagrams = [];
+            }
+        } catch (error) {
+            console.error('Error loading diagrams from localStorage:', error);
+            diagrams = [];
+        }
+
+        // If no diagrams exist, create a default one
+        if (diagrams.length === 0) {
+            handleNew();
+        }
+    }
+
+    function saveDiagrams() {
+        try {
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(diagrams));
+        } catch (error) {
+            console.error('Error saving diagrams to localStorage:', error);
+            alert('保存失败: ' + error.message);
+        }
+    }
+
+    function renderList(filter = '') {
+        // Clear the current list
+        diagramListContainer.innerHTML = '';
+        
+        // Filter diagrams by name using case-insensitive contains matching
+        const filteredDiagrams = diagrams.filter(
+            diagram => !filter || diagram.name.toLowerCase().includes(filter.toLowerCase())
+        );
+        
+        // Create and append elements for each diagram
+        filteredDiagrams.forEach(diagram => {
+            const listItem = document.createElement('div');
+            listItem.className = 'diagram-list-item';
+            listItem.dataset.id = diagram.id;
+            if (diagram.id === currentDiagramId) {
+                listItem.classList.add('selected');
+            }
+            
+            // Create diagram name container
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'diagram-name';
+            nameSpan.textContent = diagram.name;
+            
+            // Create action buttons container
+            const actionDiv = document.createElement('div');
+            actionDiv.className = 'diagram-actions';
+            
+            // Create rename button
+            const renameButton = document.createElement('button');
+            renameButton.className = 'action-icon rename-btn';
+            renameButton.title = '重命名';
+            renameButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
+            renameButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent triggering the list item click
+                
+                // Replace the name span with an input field
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.className = 'rename-input';
+                nameInput.value = diagram.name;
+                nameInput.dataset.originalName = diagram.name;
+                
+                // Create form to handle submit
+                const form = document.createElement('form');
+                form.className = 'rename-form';
+                form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const newName = nameInput.value.trim();
+                    if (newName && newName !== diagram.name) {
+                        handleRename(diagram.id, newName);
+                    } else {
+                        // If empty or unchanged, cancel rename
+                        renderList(searchInput.value);
+                    }
+                });
+                
+                // Handle clicking outside to cancel
+                function handleClickOutside(e) {
+                    if (!form.contains(e.target)) {
+                        form.dispatchEvent(new Event('submit'));
+                        document.removeEventListener('click', handleClickOutside);
+                    }
+                }
+                
+                // Add click outside listener after a short delay to avoid immediate trigger
+                setTimeout(() => {
+                    document.addEventListener('click', handleClickOutside);
+                }, 10);
+                
+                // Handle escape key to cancel
+                nameInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        renderList(searchInput.value);
+                        document.removeEventListener('click', handleClickOutside);
+                    }
+                });
+                
+                form.appendChild(nameInput);
+                listItem.replaceChild(form, nameSpan);
+                nameInput.select();
+                nameInput.focus();
+            });
+            
+            // Create delete button
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'action-icon delete-btn';
+            deleteButton.title = '删除';
+            deleteButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+            deleteButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent triggering the list item click
+                handleDelete(diagram.id);
+            });
+            
+            // Add event listener to the list item for selecting the diagram
+            listItem.addEventListener('click', () => selectDiagram(diagram.id));
+            
+            // Append elements to the list item
+            actionDiv.appendChild(renameButton);
+            actionDiv.appendChild(deleteButton);
+            listItem.appendChild(nameSpan);
+            listItem.appendChild(actionDiv);
+            
+            // Append the list item to the container
+            diagramListContainer.appendChild(listItem);
+        });
+        
+        // Show message if no diagrams match the filter
+        if (filteredDiagrams.length === 0) {
+            const noResults = document.createElement('div');
+            noResults.className = 'p-4 text-center text-gray-500 italic';
+            noResults.textContent = filter ? '没有匹配的图表' : '没有图表，点击"新建图表"创建';
+            diagramListContainer.appendChild(noResults);
+        }
+    }
+
+    // --- Core Logic ---
+    function selectDiagram(id) {
+        // Update the current diagram ID
+        currentDiagramId = id;
+        
+        // Find the selected diagram
+        const diagram = diagrams.find(d => d.id === id);
+        
+        // Update CodeMirror content and preview
+        if (diagram) {
+            // Set editor value without triggering an event, then manually refresh
+            codeMirrorInstance.setValue(diagram.content);
+            codeMirrorInstance.refresh();
+            
+            // Update the preview
+            updatePreview(diagram.content);
+        } else {
+            // Clear editor and preview if no diagram is selected
+            codeMirrorInstance.setValue('');
+            mermaidPreviewContainer.innerHTML = '';
+            if (defaultPreviewText) defaultPreviewText.classList.remove('hidden');
+        }
+        
+        // Update the list to show the selected diagram
+        renderList(searchInput.value);
+    }
+
+    // Rename diagram function
+    function handleRename(id, newName) {
+        const diagramIndex = diagrams.findIndex(d => d.id === id);
+        if (diagramIndex === -1) return;
+        
+        // Update the diagram name
+        diagrams[diagramIndex].name = newName;
+        diagrams[diagramIndex].lastModified = new Date().toISOString();
+        
+        // Save to local storage
+        saveDiagrams();
+        
+        // Update the list to show the new name
+        renderList(searchInput.value);
+        
+        // Show save indicator
+        showSaveIndicator();
+    }
+
+    // Variable to store autosave timer
+    let autoSaveTimer = null;
+    let hasUnsavedChanges = false;
+
+    // Show save indicator function
+    function showSaveIndicator() {
+        const saveIndicator = document.getElementById('save-indicator');
+        saveIndicator.classList.add('visible');
+        
+        // Hide the indicator after a delay
+        setTimeout(() => {
+            saveIndicator.classList.remove('visible');
+        }, 2000);
+    }
+
+    function handleSave() {
+        if (!currentDiagramId) return;
+        
+        // Find the current diagram
+        const diagramIndex = diagrams.findIndex(d => d.id === currentDiagramId);
+        if (diagramIndex === -1) return;
+        
+        // Update the diagram content
+        diagrams[diagramIndex].content = codeMirrorInstance.getValue();
+        diagrams[diagramIndex].lastModified = new Date().toISOString();
+        
+        // Save to local storage
+        saveDiagrams();
+        
+        // Reset unsaved changes flag
+        hasUnsavedChanges = false;
+        
+        // Show save indicator
+        showSaveIndicator();
+    }
+
+    // Setup autosave functionality
+    function setupAutoSave() {
+        // Add change listener to CodeMirror for autosave
+        codeMirrorInstance.on('change', () => {
+            if (!currentDiagramId) return;
+            
+            // Set flag for unsaved changes
+            hasUnsavedChanges = true;
+            
+            // Clear any existing autosave timer
+            if (autoSaveTimer) clearTimeout(autoSaveTimer);
+            
+            // Set new autosave timer (save after 2 seconds of inactivity)
+            autoSaveTimer = setTimeout(() => {
+                handleSave();
+            }, 2000);
+        });
+        
+        // Add beforeunload handler to warn about unsaved changes
+        window.addEventListener('beforeunload', (e) => {
+            if (hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = '您有未保存的更改，确定要离开吗？';
+                return e.returnValue;
+            }
+        });
+    }
+
+    function handleNew() {
+        // Generate a unique ID
+        const newId = Date.now().toString();
+        
+        // Create a new diagram with default content
+        const newDiagram = {
+            id: newId,
+            name: `新图表 ${diagrams.length + 1}`,
+            content: DEFAULT_DIAGRAM_CONTENT,
+            created: new Date().toISOString(),
+            lastModified: new Date().toISOString()
+        };
+        
+        // Add to diagrams array
+        diagrams.unshift(newDiagram);
+        
+        // Save to local storage
+        saveDiagrams();
+        
+        // Select the new diagram
+        selectDiagram(newId);
+        
+        // Focus the editor
+        if (codeMirrorInstance) {
+            codeMirrorInstance.focus();
+        }
+    }
+
+    function handleDelete(id) {
+        // Confirm deletion
+        if (!confirm('确定要删除这个图表吗?')) return;
+        
+        // Filter out the diagram to delete
+        diagrams = diagrams.filter(d => d.id !== id);
+        
+        // Save the updated list
+        saveDiagrams();
+        
+        // If the deleted diagram was selected, select the first available or null
+        if (currentDiagramId === id) {
+            currentDiagramId = diagrams.length > 0 ? diagrams[0].id : null;
+            selectDiagram(currentDiagramId);
+        }
+        
+        // Update the list display
+        renderList(searchInput.value);
+    }
+
+    // --- Toggle Column Logic ---
+    // Expanded storage key for layout preferences
+    const LAYOUT_STORAGE_KEY = 'mermaid_editor_layout_v1';
+
+    // Load layout preferences from local storage
+    function loadLayoutPreferences() {
+        try {
+            const savedLayout = localStorage.getItem(LAYOUT_STORAGE_KEY);
+            if (savedLayout) {
+                const layout = JSON.parse(savedLayout);
+                
+                // Apply column visibility settings
+                if (layout.leftColumnVisible === false) {
+                    toggleColumn(listColumn, resizer1, toggleLeftButton, false);
+                }
+                
+                if (layout.rightColumnVisible === false) {
+                    toggleColumn(editorColumn, resizer2, toggleRightButton, false);
+                }
+                
+                // Apply column widths if available
+                if (layout.leftColumnWidth) {
+                    listColumn.style.flexBasis = layout.leftColumnWidth;
+                }
+                
+                if (layout.previewColumnWidth) {
+                    previewColumn.style.flexBasis = layout.previewColumnWidth;
+                }
+                
+                if (layout.rightColumnWidth) {
+                    editorColumn.style.flexBasis = layout.rightColumnWidth;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading layout preferences:', error);
+        }
+    }
+
+    // Save layout preferences to local storage
+    function saveLayoutPreferences() {
+        try {
+            const layout = {
+                leftColumnVisible: !listColumn.classList.contains('hidden'),
+                rightColumnVisible: !editorColumn.classList.contains('hidden'),
+                leftColumnWidth: listColumn.style.flexBasis,
+                previewColumnWidth: previewColumn.style.flexBasis,
+                rightColumnWidth: editorColumn.style.flexBasis
+            };
+            
+            localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+        } catch (error) {
+            console.error('Error saving layout preferences:', error);
+        }
+    }
+
+    // Function to toggle the visibility of a column and its associated resizer
+    function toggleColumn(columnElement, resizerElement, buttonElement, savePrefs = true) {
+        const isHidden = columnElement.classList.toggle('hidden');
+        if (resizerElement) {
+            resizerElement.classList.toggle('hidden', isHidden);
+        }
+        buttonElement.classList.toggle('active', !isHidden);
+
+        // Use requestAnimationFrame to ensure layout updates happen before fitting
+        requestAnimationFrame(() => {
+            if (codeMirrorInstance && columnElement === editorColumn) {
+                codeMirrorInstance.refresh();
+            }
+            
+            // Save layout preferences if needed
+            if (savePrefs) {
+                saveLayoutPreferences();
+            }
+            
+            // Fit the view after a short delay to allow CSS transitions
+            setTimeout(fitToView, 50);
+        });
+    }
+
+    // Initialize the toggle buttons
+    function initToggleButtons() {
+        toggleLeftButton.addEventListener('click', () => toggleColumn(listColumn, resizer1, toggleLeftButton));
+        toggleRightButton.addEventListener('click', () => toggleColumn(editorColumn, resizer2, toggleRightButton));
+    }
+
+    // --- Enhanced Resizer Logic ---
+    function initResizers() {
+        resizers.forEach(resizer => {
+            const columnId = resizer.dataset.resizerFor;
+            const column = document.getElementById(columnId);
+            
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isResizing = true;
+                activeResizer = resizer;
+                document.body.style.cursor = 'col-resize';
+                
+                // Add active class to the resizer for visual feedback
+                resizer.classList.add('active');
+                
+                // Add resizing class to the document
+                document.documentElement.classList.add('resizing');
+            });
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            
+            const columnId = activeResizer.dataset.resizerFor;
+            const column = document.getElementById(columnId);
+            
+            if (column === listColumn) {
+                // Resizing the list column from its right edge
+                const containerRect = document.querySelector('.main-container').getBoundingClientRect();
+                const newWidth = Math.max(MIN_COLUMN_WIDTH, e.clientX - containerRect.left);
+                
+                // Calculate width as percentage of container
+                const percentage = (newWidth / containerRect.width) * 100;
+                column.style.flexBasis = `${percentage}%`;
+                
+                // Adjust preview column width to maintain proportions
+                const previewPercentage = 100 - percentage;
+                if (!editorColumn.classList.contains('hidden')) {
+                    const remainingSpace = previewPercentage;
+                    const editorFlexBasis = parseFloat(editorColumn.style.flexBasis) || 40;
+                    const previewFlexBasis = parseFloat(previewColumn.style.flexBasis) || 40;
+                    
+                    // Calculate new ratios
+                    const total = editorFlexBasis + previewFlexBasis;
+                    previewColumn.style.flexBasis = `${(previewFlexBasis / total) * remainingSpace}%`;
+                    editorColumn.style.flexBasis = `${(editorFlexBasis / total) * remainingSpace}%`;
+                } else {
+                    previewColumn.style.flexBasis = `${previewPercentage}%`;
+                }
+            } 
+            else if (column === previewColumn) {
+                // Resizing the preview column from its right edge
+                const containerRect = document.querySelector('.main-container').getBoundingClientRect();
+                
+                // Get the list column width
+                let listWidth = 0;
+                if (!listColumn.classList.contains('hidden')) {
+                    const listFlexBasis = parseFloat(listColumn.style.flexBasis) || 20;
+                    listWidth = (listFlexBasis / 100) * containerRect.width;
+                }
+                
+                // Calculate width relative to the container accounting for list column
+                const effectiveContainerLeft = containerRect.left + listWidth;
+                const previewWidth = Math.max(MIN_COLUMN_WIDTH, e.clientX - effectiveContainerLeft);
+                
+                // Calculate as percentage of remaining space
+                const remainingWidth = containerRect.width - listWidth;
+                const percentage = (previewWidth / remainingWidth) * (100 - (listColumn.classList.contains('hidden') ? 0 : parseFloat(listColumn.style.flexBasis) || 20));
+                
+                // Set preview column width
+                previewColumn.style.flexBasis = `${percentage}%`;
+                
+                // Adjust editor column width
+                if (!editorColumn.classList.contains('hidden')) {
+                    editorColumn.style.flexBasis = `${100 - percentage - (listColumn.classList.contains('hidden') ? 0 : parseFloat(listColumn.style.flexBasis) || 20)}%`;
+                }
+            }
+            
+            // Refresh CodeMirror to handle the resize
+            if (codeMirrorInstance) {
+                codeMirrorInstance.refresh();
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                
+                // Remove active class from resizer
+                if (activeResizer) {
+                    activeResizer.classList.remove('active');
+                }
+                
+                activeResizer = null;
+                document.body.style.cursor = '';
+                document.documentElement.classList.remove('resizing');
+                
+                // Save the layout preferences
+                saveLayoutPreferences();
+                
+                // Refresh the editor
+                if (codeMirrorInstance) {
+                    codeMirrorInstance.refresh();
+                }
+                
+                // Apply SVG transform
+                applySvgTransform();
+            }
+        });
+    }
+
+    // --- Zoom and Pan Logic ---
+
+    // Function to apply the calculated transform to the SVG element
+    function applySvgTransform() {
+        const svg = mermaidPreviewContainer.querySelector('svg');
+        if (svg) {
+            // Ensure intrinsic dimensions are stored/retrieved for calculations
+            let svgWidth = parseFloat(svg.dataset.width);
+            let svgHeight = parseFloat(svg.dataset.height);
+
+            // If dimensions are not in dataset, try to get them from BBox
+            if (isNaN(svgWidth) || isNaN(svgHeight) || svgWidth <= 0 || svgHeight <= 0) {
+                try {
+                    const bbox = svg.getBBox();
+                    svgWidth = bbox.width;
+                    svgHeight = bbox.height;
+                    // Store valid dimensions back to dataset
+                    if (svgWidth > 0 && svgHeight > 0) {
+                        svg.dataset.width = svgWidth;
+                        svg.dataset.height = svgHeight;
+                    } else {
+                         console.warn("applySvgTransform: Invalid BBox dimensions", svgWidth, svgHeight);
+                         return; // Cannot proceed with invalid dimensions
+                    }
+                } catch (e) {
+                    console.warn("Could not get SVG BBox in applySvgTransform", e);
+                    return; // Cannot apply transform without dimensions
+                }
+            }
+
+            // Set transform origin to the center of the SVG's bounding box
+            svg.style.transformOrigin = `${svgWidth / 2}px ${svgHeight / 2}px`;
+
+            // Get the container's current dimensions and center point
+            const containerRect = mermaidPreviewContainer.getBoundingClientRect();
+            // Fallback to offsetWidth/Height if getBoundingClientRect fails or returns 0
+            const containerWidth = containerRect.width > 0 ? containerRect.width : mermaidPreviewContainer.offsetWidth;
+            const containerHeight = containerRect.height > 0 ? containerRect.height : mermaidPreviewContainer.offsetHeight;
+
+            if (containerWidth <= 0 || containerHeight <= 0) {
+                 console.warn("applySvgTransform: Invalid container dimensions", containerWidth, containerHeight);
+                 return; // Cannot calculate transform without container size
+            }
+
+            const containerCenterX = containerWidth / 2;
+            const containerCenterY = containerHeight / 2;
+
+            // Calculate the top-left position for the SVG based on its center offset (svgCurrentX/Y)
+            const translateX = containerCenterX + svgCurrentX - (svgWidth / 2);
+            const translateY = containerCenterY + svgCurrentY - (svgHeight / 2);
+
+            // Apply the combined translate and scale transform
+            // console.log(`Applying transform: translate(${translateX.toFixed(2)}px, ${translateY.toFixed(2)}px) scale(${currentZoom.toFixed(2)})`); // Debug log
+            svg.style.transform = `translate(${translateX}px, ${translateY}px) scale(${currentZoom})`;
+        } else {
+             // console.log("applySvgTransform: No SVG found."); // Debug log
+        }
+    }
+
+
+    // Reset zoom to 100% and center the diagram
+    function resetZoomAndPan() {
+        // console.log("Resetting zoom and pan"); // Debug log
+        currentZoom = 1.0; // Reset zoom level
+        svgCurrentX = 0; // Reset center offset X
+        svgCurrentY = 0; // Reset center offset Y
+        applySvgTransform(); // Apply the reset transform
+    }
+
+    // Zoom towards the center of the container view (used by buttons)
+    function zoomAtCenter(factor) {
+         // Calculate new zoom level, clamped within min/max bounds
+         const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom * factor));
+         // Calculate the ratio of new zoom to old zoom
+         const zoomRatio = newZoom / currentZoom;
+
+         // Scale the current center offset based on the zoom change
+         svgCurrentX *= zoomRatio;
+         svgCurrentY *= zoomRatio;
+
+         // Update zoom state and apply the transform
+         currentZoom = newZoom;
+         // console.log(`Zooming at center: newZoom=${newZoom.toFixed(2)}, svgCurrentX=${svgCurrentX.toFixed(2)}, svgCurrentY=${svgCurrentY.toFixed(2)}`); // Debug log
+         applySvgTransform();
+    }
+
+     // Fit the entire diagram within the container view, adding padding
+     function fitToView() {
+        const svg = mermaidPreviewContainer.querySelector('svg');
+        const containerRect = mermaidPreviewContainer.getBoundingClientRect();
+        const containerWidth = containerRect.width > 0 ? containerRect.width : mermaidPreviewContainer.offsetWidth;
+        const containerHeight = containerRect.height > 0 ? containerRect.height : mermaidPreviewContainer.offsetHeight;
+
+        // Check if SVG and container are valid and have dimensions
+        if (!svg || containerWidth <= 0 || containerHeight <= 0) {
+            console.warn("Cannot fit to view: Invalid SVG or container state.");
+            resetZoomAndPan(); // Fallback to reset if cannot calculate
+            return;
+        }
+
+        let svgWidth = parseFloat(svg.dataset.width);
+        let svgHeight = parseFloat(svg.dataset.height);
+
+         // Try getting BBox if dataset dimensions are invalid
+         if (isNaN(svgWidth) || isNaN(svgHeight) || svgWidth <= 0 || svgHeight <= 0) {
+             try {
+                 const bbox = svg.getBBox();
+                 svgWidth = bbox.width;
+                 svgHeight = bbox.height;
+                 if (svgWidth > 0 && svgHeight > 0) {
+                     svg.dataset.width = svgWidth;
+                     svg.dataset.height = svgHeight;
+                 } else {
+                      console.warn("fitToView: Invalid BBox dimensions", svgWidth, svgHeight);
+                      resetZoomAndPan(); return;
+                 }
+             } catch (e) {
+                 console.warn("Could not get SVG BBox in fitToView", e);
+                 resetZoomAndPan(); return;
+             }
+         }
+
+
+        // Calculate the available width and height within the container, considering padding
+        const availableWidth = containerWidth - FIT_PADDING * 2;
+        const availableHeight = containerHeight - FIT_PADDING * 2;
+
+        // Check if there's enough space after applying padding
+        if (availableWidth <= 0 || availableHeight <= 0) {
+            console.warn("Cannot fit to view: Not enough space in container with padding. Fitting without padding.");
+            // Fit without padding as a fallback
+            const zoomX_noPad = containerWidth / svgWidth;
+            const zoomY_noPad = containerHeight / svgHeight;
+            currentZoom = Math.min(zoomX_noPad, zoomY_noPad); // Fit without padding
+        } else {
+             // Calculate the required zoom level to fit based on width and height ratios with padding
+            const zoomX = availableWidth / svgWidth;
+            const zoomY = availableHeight / svgHeight;
+            // Use the smaller zoom level to ensure the entire diagram fits within bounds
+            currentZoom = Math.min(zoomX, zoomY);
+        }
+
+
+        // Clamp the calculated zoom level within the defined min/max bounds
+        currentZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom));
+
+        // Reset the position to center the diagram after fitting
+        svgCurrentX = 0;
+        svgCurrentY = 0;
+
+        // console.log(`Fitting to view: newZoom=${currentZoom.toFixed(2)}`); // Debug log
+        applySvgTransform(); // Apply the calculated zoom and centered position
+    }
+
+
+    // Initialize zoom and pan event listeners on the preview container
+    function initZoomPan() {
+        // --- Wheel zoom (zooms towards the cursor position) ---
+        mermaidPreviewContainer.addEventListener('wheel', (e) => {
+            e.preventDefault(); // Prevent default page scrolling behavior
+            const svg = mermaidPreviewContainer.querySelector('svg');
+            if (!svg) return; // Exit if no SVG is present
+
+            const rect = mermaidPreviewContainer.getBoundingClientRect(); // Get container dimensions/position
+            const containerWidth = rect.width > 0 ? rect.width : mermaidPreviewContainer.offsetWidth;
+            const containerHeight = rect.height > 0 ? rect.height : mermaidPreviewContainer.offsetHeight;
+            if (containerWidth <= 0 || containerHeight <= 0) return; // Cannot zoom without container size
+
+            // Calculate mouse position relative to the container's top-left corner
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // --- Calculate new zoom level ---
+            const delta = e.deltaY * ZOOM_SENSITIVITY * -1; // Determine zoom direction and magnitude
+            const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom * Math.exp(delta))); // Calculate new zoom, clamped
+            const zoomRatio = newZoom / currentZoom; // Ratio of new zoom to old zoom
+
+            // --- Calculate translation adjustment to keep mouse point stationary ---
+            // Position of the mouse relative to the container's center
+            const mouseOffsetX = mouseX - containerWidth / 2;
+            const mouseOffsetY = mouseY - containerHeight / 2;
+
+            // Adjust the SVG center offset (svgCurrentX/Y)
+            svgCurrentX = mouseOffsetX - (mouseOffsetX - svgCurrentX) * zoomRatio;
+            svgCurrentY = mouseOffsetY - (mouseOffsetY - svgCurrentY) * zoomRatio;
+
+            // Update zoom state and apply the transform
+            currentZoom = newZoom;
+            applySvgTransform();
+
+        }, { passive: false }); // Use active listener to allow preventDefault
+
+        // --- Panning (drag with mouse) ---
+        mermaidPreviewContainer.addEventListener('mousedown', (e) => {
+            // Activate panning only for the primary mouse button and if an SVG exists
+            if (e.button !== 0 || !mermaidPreviewContainer.querySelector('svg')) return;
+
+            isPanning = true; // Set panning state
+            panStartX = e.clientX; // Record starting mouse X
+            panStartY = e.clientY; // Record starting mouse Y
+            svgInitialX = svgCurrentX; // Record starting SVG center offset X
+            svgInitialY = svgCurrentY; // Record starting SVG center offset Y
+            mermaidPreviewContainer.classList.add('grabbing'); // Add class for visual feedback (cursor)
+            mermaidPreviewContainer.style.cursor = 'grabbing'; // Explicitly set cursor style
+        });
+
+        // Listen on the *document* for mouse movements to handle dragging outside the preview area
+        document.addEventListener('mousemove', (e) => {
+            if (!isPanning) return; // Only act if panning is active
+
+            const dx = e.clientX - panStartX; // Calculate horizontal drag distance
+            const dy = e.clientY - panStartY; // Calculate vertical drag distance
+
+            // Update the SVG center offset based on the initial offset and drag distance
+            svgCurrentX = svgInitialX + dx;
+            svgCurrentY = svgInitialY + dy;
+
+            applySvgTransform(); // Apply the new transform continuously during drag
+        });
+
+        // Listen on the *document* for mouse up to stop panning anywhere on the page
+        document.addEventListener('mouseup', (e) => {
+             // Stop panning if it was active and the primary button was released
+             if (isPanning && e.button === 0) {
+                isPanning = false; // Reset panning state
+                mermaidPreviewContainer.classList.remove('grabbing'); // Remove visual feedback class
+                mermaidPreviewContainer.style.cursor = 'grab'; // Reset cursor style
+            }
+        });
+
+         // Add a listener for when the mouse leaves the document window entirely
+         document.addEventListener('mouseleave', () => {
+            if (isPanning) {
+                isPanning = false; // Reset panning state
+                mermaidPreviewContainer.classList.remove('grabbing'); // Remove visual feedback
+                mermaidPreviewContainer.style.cursor = 'grab'; // Reset cursor
+            }
+        });
+    }
+
+
+    // --- Init Control Buttons ---
+    // Add event listeners to the preview control buttons
+    function initControlButtons() {
+        zoomInButton.addEventListener('click', () => zoomAtCenter(ZOOM_BUTTON_FACTOR));
+        zoomOutButton.addEventListener('click', () => zoomAtCenter(1 / ZOOM_BUTTON_FACTOR));
+        resetViewButton.addEventListener('click', resetZoomAndPan);
+        fitViewButton.addEventListener('click', fitToView);
+    }
+
+
+    // --- Modified updatePreview to handle default text visibility ---
+    async function updatePreview(mermaidCode) {
+        // Hide default text and show loading state
+        if (defaultPreviewText) defaultPreviewText.classList.add('hidden');
+        mermaidPreviewContainer.innerHTML = '<span class="text-gray-500">正在渲染...</span>'; // Show loading state
+        mermaidErrorContainer.classList.add('hidden');
+        mermaidErrorContainer.textContent = '';
+
+        if (!mermaidCode.trim()) {
+            mermaidPreviewContainer.innerHTML = ''; // Clear loading message
+            if (defaultPreviewText) defaultPreviewText.classList.remove('hidden'); // Show default text again
+            resetZoomAndPan();
+            return;
+        }
+
+        try {
+            if (!window.mermaid) throw new Error("Mermaid library is not loaded.");
+            const uniqueId = 'mermaid-graph-' + Date.now();
+            const { svg } = await window.mermaid.render(uniqueId, mermaidCode);
+
+            // Clear loading message before inserting SVG
+            mermaidPreviewContainer.innerHTML = '';
+            // Insert the rendered SVG
+            mermaidPreviewContainer.insertAdjacentHTML('beforeend', svg);
+
+            const newSvgElement = mermaidPreviewContainer.querySelector('svg');
+            if (newSvgElement) {
+                try {
+                    const bbox = newSvgElement.getBBox();
+                    newSvgElement.dataset.width = bbox.width;
+                    newSvgElement.dataset.height = bbox.height;
+                } catch (e) {
+                    console.warn("Could not get SVG BBox after render", e);
+                    // Attempt to apply transform even without bbox, might use previous values if available
+                }
+                applySvgTransform(); // Apply current zoom/pan state
+            } else {
+                 // If SVG wasn't created, show default text
+                 if (defaultPreviewText) defaultPreviewText.classList.remove('hidden');
+            }
+
+        } catch (error) {
+            console.error("Mermaid rendering error:", error);
+            mermaidPreviewContainer.innerHTML = '<span class="text-red-500 font-bold">渲染错误!</span>';
+            mermaidErrorContainer.textContent = `渲染错误:\n${error.message || String(error)}`;
+            mermaidErrorContainer.classList.remove('hidden');
+            resetZoomAndPan();
+        }
+    }
+
+
+    // --- Event Listeners & Startup ---
+    newButton.addEventListener('click', handleNew);
+    saveButton.addEventListener('click', handleSave);
+    searchInput.addEventListener('input', (e) => renderList(e.target.value));
+
+    // --- Initialize the application ---
+    loadDiagrams();
+    initCodeMirror();
+    setupAutoSave();
+    initResizers();
+    initZoomPan();
+    initToggleButtons();
+    initControlButtons();
+    initExport();
+    
+    // Load layout preferences after initializing controls
+    loadLayoutPreferences();
+    
+    // Select diagram after everything is initialized
+    selectDiagram(diagrams.length > 0 ? diagrams[0].id : null);
+
+    // --- Export Functionality ---
+    let selectedExportFormat = 'png';
+    let selectedExportScale = 2;
+
+    // Initialize export functionality
+    function initExport() {
+        const exportButton = document.getElementById('export-button');
+        const exportModal = document.getElementById('export-modal');
+        const exportModalClose = document.getElementById('export-modal-close');
+        const exportCancel = document.getElementById('export-cancel');
+        const exportConfirm = document.getElementById('export-confirm');
+        const exportOptions = document.querySelectorAll('.export-option');
+        const exportScaleOptions = document.querySelectorAll('.export-scale-option');
+        
+        // Show export modal when clicking the export button
+        exportButton.addEventListener('click', () => {
+            if (!currentDiagramId) {
+                alert('请先选择或创建一个图表');
+                return;
+            }
+            
+            // Check if SVG exists in the preview
+            const svg = mermaidPreviewContainer.querySelector('svg');
+            if (!svg) {
+                alert('当前没有可导出的图表');
+                return;
+            }
+            
+            // Show the modal
+            exportModal.classList.add('visible');
+        });
+        
+        // Close modal on clicking close button, cancel button, or outside the modal
+        exportModalClose.addEventListener('click', () => exportModal.classList.remove('visible'));
+        exportCancel.addEventListener('click', () => exportModal.classList.remove('visible'));
+        exportModal.addEventListener('click', (e) => {
+            if (e.target === exportModal) {
+                exportModal.classList.remove('visible');
+            }
+        });
+        
+        // Handle format selection
+        exportOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                // Remove selected class from all options
+                exportOptions.forEach(opt => opt.classList.remove('selected'));
+                
+                // Add selected class to clicked option
+                option.classList.add('selected');
+                
+                // Update selected format
+                selectedExportFormat = option.dataset.format;
+            });
+        });
+        
+        // Handle scale selection
+        exportScaleOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                // Remove selected class from all options
+                exportScaleOptions.forEach(opt => opt.classList.remove('selected'));
+                
+                // Add selected class to clicked option
+                option.classList.add('selected');
+                
+                // Update selected scale
+                selectedExportScale = parseFloat(option.dataset.scale);
+            });
+        });
+        
+        // Handle export confirmation
+        exportConfirm.addEventListener('click', () => {
+            exportDiagram();
+            exportModal.classList.remove('visible');
+        });
+    }
+
+    // Export diagram as PNG or SVG
+    function exportDiagram() {
+        // Get the SVG element
+        const svg = mermaidPreviewContainer.querySelector('svg');
+        if (!svg) return;
+        
+        // Get the current diagram to use its name for the file
+        const diagram = diagrams.find(d => d.id === currentDiagramId);
+        if (!diagram) return;
+        
+        // Generate filename using diagram name (with spaces replaced by underscores)
+        const fileName = diagram.name.replace(/\s+/g, '_').replace(/[^\w-]/g, '') || 'mermaid_diagram';
+        
+        // Show loading status
+        const exportStatus = document.getElementById('export-status');
+        const exportConfirm = document.getElementById('export-confirm');
+        exportStatus.classList.remove('hidden');
+        exportConfirm.disabled = true;
+        
+        if (selectedExportFormat === 'svg') {
+            // For SVG export, we can clone the SVG and download it directly
+            const svgClone = svg.cloneNode(true);
+            
+            // Clean up the SVG for standalone use
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            
+            // Get SVG dimensions
+            const width = parseFloat(svg.dataset.width || svg.getAttribute('width') || svg.getBBox().width);
+            const height = parseFloat(svg.dataset.height || svg.getAttribute('height') || svg.getBBox().height);
+            
+            // Set width and height attributes
+            svgClone.setAttribute('width', width);
+            svgClone.setAttribute('height', height);
+            
+            // Add background rectangle for better visibility
+            const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            bgRect.setAttribute('width', '100%');
+            bgRect.setAttribute('height', '100%');
+            bgRect.setAttribute('fill', 'white');
+            svgClone.insertBefore(bgRect, svgClone.firstChild);
+            
+            // Serialize SVG to string
+            const serializer = new XMLSerializer();
+            let svgString = serializer.serializeToString(svgClone);
+            
+            // Add XML declaration
+            svgString = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' + svgString;
+            
+            // Create download link
+            const downloadLink = document.createElement('a');
+            downloadLink.download = `${fileName}.svg`;
+            downloadLink.href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+            
+            // Hide loading status
+            exportStatus.classList.add('hidden');
+            exportConfirm.disabled = false;
+            
+            // Trigger download
+            downloadLink.click();
+        } else {
+            // For PNG export, use html-to-image approach which is more reliable than canvas
+            
+            try {
+                // Create a container with the SVG inside
+                const container = document.createElement('div');
+                container.style.position = 'absolute';
+                container.style.left = '-9999px';
+                container.style.top = '-9999px';
+                
+                // Clone the SVG and add it to the container
+                const svgClone = svg.cloneNode(true);
+                const width = parseFloat(svg.dataset.width || svg.getAttribute('width') || svg.getBBox().width);
+                const height = parseFloat(svg.dataset.height || svg.getAttribute('height') || svg.getBBox().height);
+                
+                // Set dimensions
+                svgClone.style.width = width + 'px';
+                svgClone.style.height = height + 'px';
+                svgClone.setAttribute('width', width);
+                svgClone.setAttribute('height', height);
+                
+                // Add background
+                svgClone.style.backgroundColor = 'white';
+                
+                // Add to container and append to body
+                container.appendChild(svgClone);
+                document.body.appendChild(container);
+                
+                // Use alternative approach with fetch and Blob
+                const svgData = new XMLSerializer().serializeToString(svgClone);
+                const svgBlob = new Blob([svgData], {type: 'image/svg+xml'});
+                
+                // Convert SVG to PNG using canvas
+                const img = new Image();
+                img.onload = function() {
+                    // Create canvas with proper dimensions
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width * selectedExportScale;
+                    canvas.height = height * selectedExportScale;
+                    
+                    // Get context and set background
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Draw the image scaled
+                    ctx.scale(selectedExportScale, selectedExportScale);
+                    ctx.drawImage(img, 0, 0);
+                    
+                    try {
+                        // Get PNG data
+                        const pngUrl = canvas.toDataURL('image/png');
+                        
+                        // Create download link
+                        const downloadLink = document.createElement('a');
+                        downloadLink.download = `${fileName}.png`;
+                        downloadLink.href = pngUrl;
+                        
+                        // Hide loading status
+                        exportStatus.classList.add('hidden');
+                        exportConfirm.disabled = false;
+                        
+                        // Trigger download
+                        downloadLink.click();
+                    } catch (error) {
+                        console.error('PNG generation error:', error);
+                        // Fallback to SVG if canvas is tainted
+                        exportFallback();
+                    }
+                    
+                    // Clean up
+                    document.body.removeChild(container);
+                };
+                
+                img.onerror = function() {
+                    console.error('Image loading error');
+                    exportFallback();
+                    // Clean up
+                    document.body.removeChild(container);
+                };
+                
+                // Create object URL from Blob
+                img.src = URL.createObjectURL(svgBlob);
+            } catch (error) {
+                console.error('Export error:', error);
+                exportFallback();
+            }
+        }
+        
+        // Fallback function for when PNG export fails
+        function exportFallback() {
+            // Hide loading status
+            exportStatus.classList.add('hidden');
+            exportConfirm.disabled = false;
+            
+            // Show error message with fallback options
+            const fallbackMsg = '无法导出为PNG格式。请尝试以下方法:\n' +
+                                '1. 使用SVG格式导出\n' + 
+                                '2. 使用浏览器截图功能\n' +
+                                '3. 尝试使用不同的浏览器';
+            
+            alert(fallbackMsg);
+        }
+    }
+
+</script>
+
+</body>
+</html>
